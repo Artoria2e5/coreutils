@@ -73,6 +73,11 @@
 # include "verror.h"
 #endif
 
+#if HAVE_CLONEFILE
+# include <sys/attr.h>
+# include <sys/clonefile.h>
+#endif
+
 #if HAVE_LINUX_FALLOC_H
 # include <linux/falloc.h>
 #endif
@@ -1057,12 +1062,50 @@ copy_reg (char const *src_name, char const *dst_name,
       goto close_src_desc;
     }
 
+#if HAVE_CLONEFILE
+  /* The macOS clonefile() syscall is like link in that it takes
+     pathnames. Do it first. */
+  if (data_copy_required && x->reflink_mode)
+    {
+      bool clone_ok = false;
+      if (! *new_dst)
+        {
+          if (unlink(dst_name) != 0)
+            {
+              error (0, errno, _("cannot remove %s"), quoteaf (dst_name));
+              goto noclone;
+            }
+          if (x->verbose)
+            printf (_("removed %s\n"), quoteaf (dst_name));
+        }
+      uint32_t cloneflags = 0;
+      if (x->dereference == DEREF_NEVER) cloneflags |= CLONE_NOFOLLOW;
+      /* CLONE_NOOWNERCOPY (0x0002) is recently added with no specific
+       * date. Let's not feed ourselves to Apple-versioning. */
+      clone_ok = clonefile (src_name, dst_name, cloneflags) == 0;
+      noclone:;
+      if (clone_ok || x->reflink_mode == REFLINK_ALWAYS)
+        {
+          if (!clone_ok)
+            {
+              error (0, errno, _("failed to clone %s from %s"),
+                     quoteaf_n (0, dst_name), quoteaf_n (1, src_name));
+              return false;
+            }
+          data_copy_required = false;
+          /* This appears to be correct for the sec ctx code path. 
+           * Some extra work is done on owner stuff, but whatever. */
+          *new_dst = false;
+        }
+    }
+#endif
+
   /* The semantics of the following open calls are mandated
      by the specs for both cp and mv.  */
   if (! *new_dst)
     {
       int open_flags =
-        O_WRONLY | O_BINARY | (x->data_copy_required ? O_TRUNC : 0);
+        O_WRONLY | O_BINARY | (data_copy_required ? O_TRUNC : 0);
       dest_desc = open (dst_name, open_flags);
       dest_errno = errno;
 
@@ -1199,6 +1242,7 @@ copy_reg (char const *src_name, char const *dst_name,
       goto close_src_and_dst_desc;
     }
 
+#if ! HAVE_CLONEFILE
   /* --attributes-only overrides --reflink.  */
   if (data_copy_required && x->reflink_mode)
     {
@@ -1215,6 +1259,7 @@ copy_reg (char const *src_name, char const *dst_name,
           data_copy_required = false;
         }
     }
+#endif
 
   if (data_copy_required)
     {

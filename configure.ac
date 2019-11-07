@@ -353,6 +353,20 @@ case $utils_cv_func_setpriority,$ac_cv_func_nice in
   gl_ADD_PROG([optional_bin_progs], [nice])
 esac
 
+AC_CACHE_CHECK([for clonefile],
+  [utils_cv_func_clonefile],
+  [AC_LINK_IFELSE(
+    [AC_LANG_PROGRAM(
+       [[#include <sys/attr.h>
+         #include <sys/clonefile.h>
+       ]],
+       [[clonefile("", "", CLONE_NOFOLLOW);]])],
+    [utils_cv_func_clonefile=yes],
+    [utils_cv_func_clonefile=no])])
+if test $utils_cv_func_clonefile = yes; then
+  AC_DEFINE([HAVE_CLONEFILE], [1], [Define if clonefile exists.])
+fi
+
 AC_DEFUN([coreutils_DUMMY_1],
 [
   AC_REQUIRE([gl_READUTMP])
